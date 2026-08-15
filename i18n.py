@@ -186,47 +186,17 @@ _FR = {
     "update.button": "Vérifier les mises à jour",
     "update.checking": "Vérification...",
     "update.current_version": "v{version}",
-    # -- résultat de la vérification
-    "update.up_to_date_title": "Aucune mise à jour",
-    "update.up_to_date_message": (
-        "Tu as déjà la dernière version ({version}).\n\n"
-        "Rien à faire, l'appli est à jour."
-    ),
-    "update.available_title": "Mise à jour disponible",
-    "update.available_message": (
-        "Une nouvelle version est disponible :\n\n"
-        "    Version installée : {current}\n"
-        "    Nouvelle version : {latest}\n\n"
-        "Veux-tu la télécharger et l'installer maintenant ?\n"
-        "L'appli se fermera et se rouvrira toute seule une fois l'installation "
-        "terminée (environ une minute)."
-    ),
-    "update.notes_header": "\n\nNouveautés :\n{notes}",
-    # -- téléchargement
-    "update.downloading_title": "Téléchargement de la mise à jour",
-    "update.downloading_status": "Téléchargement de la version {version}...",
-    "update.downloading_progress": "{done} / {total} téléchargés",
-    "update.downloading_progress_unknown": "{done} téléchargés",
-    "update.download_cancelled_title": "Mise à jour annulée",
-    "update.download_cancelled_message": (
-        "Le téléchargement a été annulé. L'appli reste dans sa version actuelle."
-    ),
-    "update.ready_title": "Mise à jour prête",
-    "update.ready_message": (
-        "La version {version} a été téléchargée.\n\n"
-        "L'appli va maintenant se fermer, s'installer et se rouvrir toute seule.\n"
-        "Laisse-la faire, ça prend quelques secondes."
-    ),
-    # -- cas particuliers
-    "update.dev_mode_title": "Mode développement",
-    "update.dev_mode_message": (
-        "L'appli tourne depuis le code source, pas depuis l'exécutable : "
-        "l'installation automatique est désactivée (elle remplacerait "
-        "l'interpréteur Python).\n\n"
-        "Version installée : {current}\nDernière version publiée : {latest}\n\n"
-        "Pour te mettre à jour : `git pull` puis reconstruis l'exe."
-    ),
-    "update.error_title": "Mise à jour impossible",
+    # -- ligne de statut du menu latéral (tout tient sur 2-3 lignes étroites : ces
+    #    textes s'affichent SOUS le bouton, pas dans une fenêtre)
+    "update.button_install": "Installer la v{version}",
+    "update.status_checking": "Vérification en cours...",
+    "update.status_uptodate": "À jour (v{version})",
+    "update.status_available": "Version {version} disponible",
+    "update.status_dev_mode": "v{version} publiée (lancée depuis le code source)",
+    "update.status_downloading": "Téléchargement... {percent} %",
+    "update.status_downloading_unknown": "Téléchargement... {done}",
+    "update.status_installing": "Installation, l'appli redémarre...",
+    "update.status_cancelled": "Téléchargement annulé",
     # -- messages d'erreur (déjà traduits, affichés tels quels)
     "update.error_network": (
         "Impossible de contacter GitHub.\n\n"
@@ -563,46 +533,17 @@ _EN = {
     "update.button": "Check for updates",
     "update.checking": "Checking...",
     "update.current_version": "v{version}",
-    # -- check result
-    "update.up_to_date_title": "No update available",
-    "update.up_to_date_message": (
-        "You already have the latest version ({version}).\n\n"
-        "Nothing to do, the app is up to date."
-    ),
-    "update.available_title": "Update available",
-    "update.available_message": (
-        "A new version is available:\n\n"
-        "    Installed version: {current}\n"
-        "    New version: {latest}\n\n"
-        "Do you want to download and install it now?\n"
-        "The app will close and reopen by itself once the installation is "
-        "finished (about a minute)."
-    ),
-    "update.notes_header": "\n\nWhat's new:\n{notes}",
-    # -- download
-    "update.downloading_title": "Downloading the update",
-    "update.downloading_status": "Downloading version {version}...",
-    "update.downloading_progress": "{done} / {total} downloaded",
-    "update.downloading_progress_unknown": "{done} downloaded",
-    "update.download_cancelled_title": "Update cancelled",
-    "update.download_cancelled_message": (
-        "The download was cancelled. The app stays on its current version."
-    ),
-    "update.ready_title": "Update ready",
-    "update.ready_message": (
-        "Version {version} has been downloaded.\n\n"
-        "The app will now close, install it and reopen by itself.\n"
-        "Just let it do its thing, it takes a few seconds."
-    ),
-    # -- special cases
-    "update.dev_mode_title": "Development mode",
-    "update.dev_mode_message": (
-        "The app is running from source, not from the executable: automatic "
-        "installation is disabled (it would replace the Python interpreter).\n\n"
-        "Installed version: {current}\nLatest published version: {latest}\n\n"
-        "To update: `git pull`, then rebuild the exe."
-    ),
-    "update.error_title": "Update failed",
+    # -- side-menu status line (these are shown UNDER the button, not in a window,
+    #    so everything must fit in 2-3 narrow lines)
+    "update.button_install": "Install v{version}",
+    "update.status_checking": "Checking...",
+    "update.status_uptodate": "Up to date (v{version})",
+    "update.status_available": "Version {version} available",
+    "update.status_dev_mode": "v{version} published (running from source)",
+    "update.status_downloading": "Downloading... {percent}%",
+    "update.status_downloading_unknown": "Downloading... {done}",
+    "update.status_installing": "Installing, the app is restarting...",
+    "update.status_cancelled": "Download cancelled",
     # -- error messages (already translated, shown as-is)
     "update.error_network": (
         "Could not reach GitHub.\n\n"

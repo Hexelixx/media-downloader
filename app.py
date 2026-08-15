@@ -19,14 +19,13 @@ import queue
 import subprocess
 import sys
 import threading
-from tkinter import messagebox
 
 import customtkinter as ctk
 from tkinterdnd2 import TkinterDnD
 
 import updater
 from common import (
-    APP_VERSION, DEFAULT_OUTPUT_DIR, PAD, SILENT_IO, clean_child_env, ensure_dir,
+    APP_VERSION, DEFAULT_OUTPUT_DIR, SILENT_IO, clean_child_env, ensure_dir,
     format_size, ps_quote, run_detached_powershell, wait_targets,
 )
 from i18n import (
@@ -102,7 +101,9 @@ class ToolboxApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self.update_queue = queue.Queue()
         self.update_thread = None
         self.update_cancel = None
-        self.update_window = None
+        # État de la section mise à jour du menu ; pilote le rôle du bouton.
+        self._update_state = "idle"
+        self._pending_release = None
         # Levé juste avant le destroy() qui laisse la place à l'installation de la
         # mise à jour, pour que la boucle de sondage s'arrête net (voir _poll_update_queue).
         self._closing_for_update = False
@@ -192,11 +193,23 @@ class ToolboxApp(ctk.CTk, TkinterDnD.DnDWrapper):
         # une mise à jour, puisque c'est la preuve visible qu'elle a bien été appliquée.
         update_frame = ctk.CTkFrame(self.nav_container, fg_color="transparent")
         update_frame.grid(row=len(TOOLS) + 3, column=0, sticky="sew", pady=(0, 10))
+        # Un seul bouton, dont le rôle change selon l'état (vérifier / installer /
+        # annuler) : plus lisible qu'une rangée de boutons dont deux sont inertes.
         self.update_btn = ctk.CTkButton(
-            update_frame, text=t("update.button"), command=self._on_check_updates)
+            update_frame, text=t("update.button"), command=self._on_update_button)
         self.update_btn.pack(fill="x")
-        ctk.CTkLabel(update_frame, text=t("update.current_version", version=APP_VERSION),
-                     text_color=("gray40", "gray60")).pack(fill="x", pady=(2, 0))
+        # Barre de progression construite tout de suite mais PAS affichée : elle
+        # n'apparaît (pack) que pendant le téléchargement, et disparaît après.
+        self.update_progress = ctk.CTkProgressBar(update_frame)
+        self.update_progress.set(0)
+        # Ligne de statut : affiche la version au repos, puis le résultat de la
+        # dernière action. wraplength pour que les messages un peu longs passent à la
+        # ligne au lieu d'être coupés par la largeur du menu.
+        self.update_status = ctk.CTkLabel(
+            update_frame, text=t("update.current_version", version=APP_VERSION),
+            text_color=("gray40", "gray60"),
+            wraplength=SIDEBAR_WIDTH_EXPANDED - 40, justify="left")
+        self.update_status.pack(fill="x", pady=(2, 0))
 
     def _toggle_sidebar(self):
         if self._sidebar_animating:
@@ -258,20 +271,56 @@ class ToolboxApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self.destroy()
 
     # ------------------------------------------------------ Mises à jour ---
-    # Enchaînement complet, du clic à la nouvelle version qui s'ouvre :
-    #   _on_check_updates  -> thread   -> ("check_ok"|"check_error")
-    #   _handle_check_result           -> question à l'utilisateur
-    #   _start_download    -> thread   -> ("progress"|"download_ok"|...)
-    #   _finish_download               -> updater.apply_update() + destroy()
+    # Tout se passe DANS le menu latéral, sans aucune fenêtre de dialogue : le bouton
+    # change de rôle selon l'état et la ligne de statut juste en dessous dit où on en
+    # est. Une popup pour annoncer « tu es déjà à jour » est une interruption modale
+    # pour une information sans enjeu ; ici, l'utilisateur lit le statut s'il le veut
+    # et continue à se servir de l'appli pendant le téléchargement.
+    #
+    # États et rôle du bouton :
+    #   idle        -> "Vérifier les mises à jour"   (lance la vérification)
+    #   checking    -> désactivé, "Vérification..."
+    #   available   -> "Installer la v2026.08.15.4"  (LE consentement explicite avant
+    #                  de télécharger puis remplacer l'exe -- rien ne se fait sans ce clic)
+    #   downloading -> "Annuler"
+    #   installing  -> désactivé, l'appli se ferme et se relance
+    #
     # Tout ce qui touche à des widgets vit côté _poll_update_queue (thread de l'UI) ;
     # les threads de travail ne font QUE poser des messages dans la file. Tkinter n'est
     # pas thread-safe : toucher un widget depuis un thread de travail provoque des
     # plantages aléatoires, souvent bien plus tard et sans rapport apparent.
 
+    def _on_update_button(self):
+        """Point d'entrée unique du bouton : agit selon l'état courant."""
+        if self._update_state == "idle":
+            self._on_check_updates()
+        elif self._update_state == "available":
+            self._start_download(self._pending_release)
+        elif self._update_state == "downloading":
+            self._cancel_download()
+
+    def _set_update_state(self, state, button_text=None, status=None, enabled=True):
+        """Applique un état à la section mise à jour (bouton + ligne de statut).
+
+        Enveloppé dans un try : ces widgets peuvent avoir été détruits si la fenêtre
+        se ferme pour installer la mise à jour pendant qu'un dernier message traîne
+        encore dans la file.
+        """
+        self._update_state = state
+        try:
+            self.update_btn.configure(
+                text=button_text or t("update.button"),
+                state="normal" if enabled else "disabled")
+            if status is not None:
+                self.update_status.configure(text=status)
+        except Exception:
+            pass
+
     def _on_check_updates(self):
         if self.update_thread is not None and self.update_thread.is_alive():
             return  # vérification déjà en cours : on ignore les clics répétés
-        self.update_btn.configure(state="disabled", text=t("update.checking"))
+        self._set_update_state("checking", button_text=t("update.checking"),
+                               status=t("update.status_checking"), enabled=False)
         self.update_thread = threading.Thread(target=self._run_check, daemon=True)
         self.update_thread.start()
 
@@ -289,89 +338,75 @@ class ToolboxApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self.update_queue.put(("check_error", t("common.unexpected_error_log") + f" {e}"))
 
     def _poll_update_queue(self):
+        if self._closing_for_update:
+            # L'installation est lancée et la fenêtre part se faire remplacer : on
+            # arrête de se replanifier. Sans ça, le prochain after() tomberait sur une
+            # fenêtre détruite -> TclError remontée dans mainloop, soit une trace
+            # d'erreur au moment précis où l'appli est censée se fermer proprement.
+            return
         try:
             while True:
                 kind, payload = self.update_queue.get_nowait()
                 if kind == "check_ok":
-                    self._reset_update_button()
                     self._handle_check_result(*payload)
                 elif kind == "check_error":
-                    self._reset_update_button()
-                    messagebox.showerror(t("update.error_title"), payload, parent=self)
+                    self._set_update_state("idle", status=self._short(payload))
                 elif kind == "progress":
                     self._show_download_progress(*payload)
                 elif kind == "download_ok":
                     self._finish_download(payload)
                 elif kind == "download_error":
-                    self._close_progress_window()
-                    self._reset_update_button()
-                    messagebox.showerror(t("update.error_title"), payload, parent=self)
+                    self._hide_progress_bar()
+                    self._set_update_state("idle", status=self._short(payload))
                 elif kind == "download_cancelled":
-                    self._close_progress_window()
-                    self._reset_update_button()
-                    messagebox.showinfo(t("update.download_cancelled_title"),
-                                        t("update.download_cancelled_message"),
-                                        parent=self)
+                    self._hide_progress_bar()
+                    self._set_update_state("idle", status=t("update.status_cancelled"))
                 if self._closing_for_update:
-                    # _finish_download vient de détruire la fenêtre (l'installation est
-                    # lancée) : on arrête tout de suite. Continuer la boucle appellerait
-                    # after() sur une fenêtre morte -> TclError remontée dans mainloop,
-                    # soit une trace d'erreur à l'écran au moment précis où l'appli est
-                    # censée se fermer proprement pour se mettre à jour.
                     return
         except queue.Empty:
             pass
         self.after(100, self._poll_update_queue)
 
-    def _reset_update_button(self):
-        # configure() sur un widget détruit lève une TclError : c'est le cas normal
-        # quand la fenêtre se ferme pour installer la mise à jour pendant qu'un dernier
-        # message traîne encore dans la file.
-        try:
-            self.update_btn.configure(state="normal", text=t("update.button"))
-        except Exception:
-            pass
+    @staticmethod
+    def _short(message):
+        """Première ligne utile d'un message d'erreur, pour tenir sur la ligne de statut.
+
+        Les messages d'updater.py sont écrits « phrase courte, puis \\n\\n, puis le
+        détail » : on garde donc la phrase courte, qui suffit largement dans le menu,
+        sans avoir à maintenir un second jeu de traductions abrégées.
+        """
+        return str(message).split("\n\n")[0].strip()
 
     def _handle_check_result(self, available, release):
-        # parent=self sur TOUTES les boîtes de ce module (et pas seulement ici) : sans
-        # parent explicite, tkinter les rattache à `_default_root`, ce qui les centre sur
-        # l'écran plutôt que sur l'appli et ne garantit pas qu'elles passent devant la
-        # fenêtre principale. Rattachées explicitement, elles se centrent sur l'appli et
-        # restent forcément au-dessus d'elle -- une boîte qui s'ouvrirait derrière la
-        # fenêtre donnerait exactement l'impression que « rien ne se passe » au clic.
         latest = release["version"]
         if not available:
-            messagebox.showinfo(t("update.up_to_date_title"),
-                                t("update.up_to_date_message", version=APP_VERSION),
-                                parent=self)
+            self._set_update_state(
+                "idle", status=t("update.status_uptodate", version=APP_VERSION))
             return
 
         if not updater.can_self_update():
             # Lancée depuis les sources : sys.executable est python.exe, le remplacer
             # serait absurde et destructeur. On informe, et c'est tout.
-            messagebox.showinfo(
-                t("update.dev_mode_title"),
-                t("update.dev_mode_message", current=APP_VERSION, latest=latest),
-                parent=self)
+            self._set_update_state(
+                "idle", status=t("update.status_dev_mode", version=latest))
             return
 
-        message = t("update.available_message", current=APP_VERSION, latest=latest)
-        notes = (release.get("notes") or "").strip()
-        if notes:
-            # Notes tronquées : le corps d'une release peut faire des pages entières,
-            # et une boîte de dialogue Windows plus haute que l'écran devient
-            # inutilisable (les boutons sortent de la zone visible).
-            if len(notes) > 400:
-                notes = notes[:400].rstrip() + "..."
-            message += t("update.notes_header", notes=notes)
-
-        if messagebox.askyesno(t("update.available_title"), message, parent=self):
-            self._start_download(release)
+        # Une mise à jour existe : le bouton devient le consentement explicite. Rien
+        # n'est téléchargé ni remplacé tant que l'utilisateur ne clique pas dessus.
+        self._pending_release = release
+        self._set_update_state(
+            "available",
+            button_text=t("update.button_install", version=latest),
+            status=t("update.status_available", version=latest))
 
     def _start_download(self, release):
-        self.update_btn.configure(state="disabled", text=t("update.checking"))
+        if not release:
+            return
         self.update_cancel = threading.Event()
-        self._open_progress_window(release["version"])
+        self._set_update_state("downloading", button_text=t("common.cancel"),
+                               status=t("update.status_downloading", percent=0))
+        self.update_progress.set(0)
+        self.update_progress.pack(fill="x", pady=(4, 0))
         self.update_thread = threading.Thread(
             target=self._run_download, args=(release,), daemon=True)
         self.update_thread.start()
@@ -395,57 +430,25 @@ class ToolboxApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self.update_queue.put(
                 ("download_error", t("common.unexpected_error_log") + f" {e}"))
 
-    # ---- Petite fenêtre de progression du téléchargement
-    def _open_progress_window(self, version):
-        window = ctk.CTkToplevel(self)
-        window.title(t("update.downloading_title"))
-        window.geometry("420x150")
-        window.resizable(False, False)
-        # transient + grab_set : la fenêtre reste au-dessus de l'appli et bloque les
-        # interactions avec celle-ci pendant le téléchargement -- sans ça, rien
-        # n'empêche de relancer une vérification ou de fermer l'appli en plein transfert.
-        window.transient(self)
-        window.protocol("WM_DELETE_WINDOW", self._cancel_download)
-
-        self.update_status_label = ctk.CTkLabel(
-            window, text=t("update.downloading_status", version=version))
-        self.update_status_label.pack(**PAD)
-        self.update_progress = ctk.CTkProgressBar(window)
-        self.update_progress.set(0)
-        self.update_progress.pack(fill="x", padx=16)
-        self.update_detail_label = ctk.CTkLabel(
-            window, text="", text_color=("gray40", "gray60"))
-        self.update_detail_label.pack(pady=(4, 0))
-        ctk.CTkButton(window, text=t("common.cancel"),
-                      command=self._cancel_download).pack(pady=(6, 10))
-
-        self.update_window = window
-        # after() et pas tout de suite : sous Windows, un grab_set() sur une CTkToplevel
-        # pas encore réellement affichée échoue ("grab failed: window not viewable").
-        window.after(200, lambda: self._safe_grab(window))
-
-    @staticmethod
-    def _safe_grab(window):
-        try:
-            window.grab_set()
-        except Exception:
-            pass
-
     def _show_download_progress(self, done, total, version):
-        if self.update_window is None:
-            return
         try:
             if total:
                 self.update_progress.set(done / total)
-                detail = t("update.downloading_progress",
-                           done=format_size(done), total=format_size(total))
+                self.update_status.configure(text=t(
+                    "update.status_downloading", percent=int(done * 100 / total)))
             else:
                 # Taille totale inconnue (cas théorique : l'API GitHub la fournit
-                # toujours). On n'invente pas de pourcentage, on affiche simplement les
-                # octets reçus -- une barre qui progresse au hasard inquiète plus qu'elle
-                # ne rassure.
-                detail = t("update.downloading_progress_unknown", done=format_size(done))
-            self.update_detail_label.configure(text=detail)
+                # toujours). On n'invente pas de pourcentage, on affiche les octets
+                # reçus -- une barre qui progresse au hasard inquiète plus qu'elle ne
+                # rassure.
+                self.update_status.configure(text=t(
+                    "update.status_downloading_unknown", done=format_size(done)))
+        except Exception:
+            pass
+
+    def _hide_progress_bar(self):
+        try:
+            self.update_progress.pack_forget()
         except Exception:
             pass
 
@@ -453,32 +456,24 @@ class ToolboxApp(ctk.CTk, TkinterDnD.DnDWrapper):
         if self.update_cancel is not None:
             self.update_cancel.set()
 
-    def _close_progress_window(self):
-        window, self.update_window = self.update_window, None
-        if window is None:
-            return
-        try:
-            window.grab_release()
-            window.destroy()
-        except Exception:
-            pass
-
     def _finish_download(self, payload):
         path, version = payload
-        self._close_progress_window()
-        messagebox.showinfo(t("update.ready_title"),
-                            t("update.ready_message", version=version), parent=self)
+        self._hide_progress_bar()
         try:
             # apply_update() ne fait que PROGRAMMER le remplacement (un PowerShell
             # détaché qui attend notre mort) : il rend la main immédiatement, et c'est
             # notre destroy() juste après qui déclenche réellement la suite.
             updater.apply_update(path)
         except updater.UpdateError as e:
-            self._reset_update_button()
-            messagebox.showerror(t("update.error_title"), str(e), parent=self)
+            self._set_update_state("idle", status=self._short(e))
             return
+        self._set_update_state("installing", button_text=t("update.button"),
+                               status=t("update.status_installing"), enabled=False)
         self._closing_for_update = True
-        self.destroy()
+        # Petit délai avant de fermer : sans lui, la fenêtre disparaîtrait dans le même
+        # souffle que le clic et l'utilisateur n'aurait aucune idée de ce qui se passe
+        # -- l'appli semblerait avoir planté au lieu de s'installer.
+        self.after(1200, self.destroy)
 
     # ------------------------------------------------------ Optimisation ---
     def _freeze_active_scrollbars(self):
