@@ -147,14 +147,18 @@ def _urlopen(url, timeout):
         raise UpdateError(t("update.error_network")) from e
 
 
-def fetch_latest_release(timeout=NETWORK_TIMEOUT):
+def fetch_latest_release(timeout=NETWORK_TIMEOUT, url=None):
     """Interroge l'API GitHub et retourne un dict décrivant la dernière release :
     {version, tag, name, url, asset_url, asset_name, asset_size}.
 
     Lève UpdateError (message traduit) en cas de souci réseau, de release sans exe
     attaché, ou de tag illisible.
+
+    `url` n'existe que pour les tests (pointer une URL injoignable ou un dépôt sans
+    release, et vérifier qu'on affiche bien un message clair) : en usage normal on
+    interroge toujours le dépôt de l'appli.
     """
-    with _urlopen(LATEST_RELEASE_API, timeout) as response:
+    with _urlopen(url or LATEST_RELEASE_API, timeout) as response:
         try:
             payload = json.loads(response.read().decode("utf-8"))
         except (ValueError, UnicodeDecodeError) as e:

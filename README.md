@@ -27,8 +27,9 @@ de langue après avoir déjà traité des fichiers, pense à vérifier le dossie
 affiché dans l'onglet.
 
 Tout en bas du menu, le bouton **Vérifier les mises à jour** interroge GitHub pour voir
-s'il existe une version plus récente que celle affichée juste en dessous (`v2026.08.15`,
-le numéro de version actuel). Trois cas possibles :
+s'il existe une version plus récente que celle installée — dont le numéro est affiché en
+gris juste en dessous du bouton (`v2026.08.15`, au format date, voir
+[Schéma de version](#schéma-de-version)). Trois cas possibles :
 
 - **Déjà à jour** : un message le dit, il n'y a rien à faire.
 - **Nouvelle version disponible** : l'appli affiche l'ancien et le nouveau numéro (plus
