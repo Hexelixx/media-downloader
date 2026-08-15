@@ -103,6 +103,9 @@ class ToolboxApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self.update_thread = None
         self.update_cancel = None
         self.update_window = None
+        # Levé juste avant le destroy() qui laisse la place à l'installation de la
+        # mise à jour, pour que la boucle de sondage s'arrête net (voir _poll_update_queue).
+        self._closing_for_update = False
 
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
@@ -308,6 +311,13 @@ class ToolboxApp(ctk.CTk, TkinterDnD.DnDWrapper):
                     self._reset_update_button()
                     messagebox.showinfo(t("update.download_cancelled_title"),
                                         t("update.download_cancelled_message"))
+                if self._closing_for_update:
+                    # _finish_download vient de détruire la fenêtre (l'installation est
+                    # lancée) : on arrête tout de suite. Continuer la boucle appellerait
+                    # after() sur une fenêtre morte -> TclError remontée dans mainloop,
+                    # soit une trace d'erreur à l'écran au moment précis où l'appli est
+                    # censée se fermer proprement pour se mettre à jour.
+                    return
         except queue.Empty:
             pass
         self.after(100, self._poll_update_queue)
@@ -421,9 +431,10 @@ class ToolboxApp(ctk.CTk, TkinterDnD.DnDWrapper):
                 detail = t("update.downloading_progress",
                            done=format_size(done), total=format_size(total))
             else:
-                # Taille inconnue (serveur sans Content-Length) : barre indéterminée
-                # plutôt qu'une progression mensongère bloquée à 0 %.
-                self.update_progress.configure(mode="indeterminate")
+                # Taille totale inconnue (cas théorique : l'API GitHub la fournit
+                # toujours). On n'invente pas de pourcentage, on affiche simplement les
+                # octets reçus -- une barre qui progresse au hasard inquiète plus qu'elle
+                # ne rassure.
                 detail = t("update.downloading_progress_unknown", done=format_size(done))
             self.update_detail_label.configure(text=detail)
         except Exception:
@@ -457,6 +468,7 @@ class ToolboxApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._reset_update_button()
             messagebox.showerror(t("update.error_title"), str(e))
             return
+        self._closing_for_update = True
         self.destroy()
 
     # ------------------------------------------------------ Optimisation ---

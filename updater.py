@@ -89,6 +89,20 @@ def parse_version(text):
     return tuple(int(part) for part in match.group(1).split("."))
 
 
+def normalize_version(text):
+    """Numéro de version affichable, extrait d'un tag : "v2026.08.15" -> "2026.08.15".
+
+    Contrairement à parse_version(), on garde la chaîne TELLE QUELLE (zéros de tête
+    compris) : reconstruire le numéro depuis le tuple d'entiers afficherait "2026.8.15"
+    à côté d'un "2026.08.15" local, et deux écritures différentes du même numéro dans
+    une même boîte de dialogue donnent surtout l'impression d'un bug.
+    """
+    if not text:
+        return None
+    match = _VERSION_RE.match(str(text))
+    return match.group(1) if match else None
+
+
 def is_newer(remote_version, local_version=APP_VERSION):
     """Vrai si `remote_version` est strictement postérieure à la version locale.
 
@@ -167,9 +181,9 @@ def fetch_latest_release(timeout=NETWORK_TIMEOUT):
 
     return {
         "tag": tag,
-        # On renvoie la version NORMALISÉE (sans le "v" du tag) : c'est elle qu'on
-        # affiche et qu'on compare, le "v" n'est qu'une convention de nommage de tag.
-        "version": ".".join(str(part) for part in version),
+        # Version sans le "v" du tag : c'est elle qu'on affiche et qu'on compare, le
+        # "v" n'étant qu'une convention de nommage de tag.
+        "version": normalize_version(tag),
         "name": payload.get("name") or tag,
         "notes": (payload.get("body") or "").strip(),
         "url": payload.get("html_url") or RELEASES_PAGE,
