@@ -31,21 +31,23 @@ s'il existe une version plus récente que celle installée — dont le numéro e
 gris juste en dessous du bouton (`v2026.08.15`, au format date, voir
 [Schéma de version](#schéma-de-version)). Trois cas possibles :
 
-- **Déjà à jour** : un message le dit, il n'y a rien à faire.
-- **Nouvelle version disponible** : l'appli affiche l'ancien et le nouveau numéro (plus
-  les nouveautés, si la version publiée en mentionne) et demande confirmation. Si tu
-  acceptes, elle **télécharge la nouvelle version avec une barre de progression**
-  (annulable à tout moment), puis **se ferme, s'installe et se rouvre toute seule** —
-  il n'y a rien à télécharger à la main, ni de `.zip` à décompresser. L'opération ne
-  remplace que `MediaDownloader.exe` : le dossier `bin\` et le fichier `settings.json`
-  (ta langue) restent en place.
-- **Pas de connexion, GitHub injoignable ou trop de vérifications d'affilée** : un
-  message clair l'explique, l'appli continue de fonctionner normalement.
+- **Déjà à jour** : le statut affiche « À jour (v2026.08.15.5) ».
+- **Nouvelle version disponible** : le statut l'indique et **le bouton lui-même devient
+  « Installer la v… »**. Rien n'est téléchargé tant que tu ne cliques pas dessus : ce
+  second clic est la confirmation. Le téléchargement affiche alors sa progression en
+  pourcentage sous le bouton (qui devient **Annuler**), puis l'appli **se ferme,
+  s'installe et se rouvre toute seule** — rien à télécharger à la main, ni de `.zip` à
+  décompresser. L'opération ne remplace que `MediaDownloader.exe` : le dossier `bin\` et
+  le fichier `settings.json` (ta langue) restent en place.
+- **Pas de connexion, GitHub injoignable ou trop de vérifications d'affilée** : le statut
+  affiche la raison, l'appli continue de fonctionner normalement.
 
-La vérification se fait **en tâche de fond** : la fenêtre ne se fige jamais, même si
-GitHub met du temps à répondre. Aucun compte ni mot de passe n'est nécessaire (le dépôt
-est public) et **l'appli ne vérifie rien toute seule** — rien ne part sur le réseau tant
-que tu n'as pas cliqué sur le bouton.
+Tout se passe **dans le menu**, sans aucune fenêtre qui s'ouvre par-dessus : une popup
+pour annoncer « tu es déjà à jour » interrompt pour rien, et pendant le téléchargement tu
+peux continuer à te servir des autres outils. La vérification se fait **en tâche de
+fond** : la fenêtre ne se fige jamais, même si GitHub met du temps à répondre. Aucun
+compte ni mot de passe n'est nécessaire (le dépôt est public) et **l'appli ne vérifie
+rien toute seule** — rien ne part sur le réseau tant que tu n'as pas cliqué.
 
 Le contenu de chaque outil défile verticalement (comme une page web) si la fenêtre est
 redimensionnée en plus petit : rien n'est jamais coupé/inaccessible, même quand le journal
