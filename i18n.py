@@ -182,6 +182,95 @@ _FR = {
     "app.theme_dark": "Sombre",
     "app.language_label": "Langue",
 
+    # -------------------------------------------------- Mises à jour ---
+    "update.button": "Vérifier les mises à jour",
+    "update.checking": "Vérification...",
+    "update.current_version": "v{version}",
+    # -- résultat de la vérification
+    "update.up_to_date_title": "Aucune mise à jour",
+    "update.up_to_date_message": (
+        "Tu as déjà la dernière version ({version}).\n\n"
+        "Rien à faire, l'appli est à jour."
+    ),
+    "update.available_title": "Mise à jour disponible",
+    "update.available_message": (
+        "Une nouvelle version est disponible :\n\n"
+        "    Version installée : {current}\n"
+        "    Nouvelle version : {latest}\n\n"
+        "Veux-tu la télécharger et l'installer maintenant ?\n"
+        "L'appli se fermera et se rouvrira toute seule une fois l'installation "
+        "terminée (environ une minute)."
+    ),
+    "update.notes_header": "\n\nNouveautés :\n{notes}",
+    # -- téléchargement
+    "update.downloading_title": "Téléchargement de la mise à jour",
+    "update.downloading_status": "Téléchargement de la version {version}...",
+    "update.downloading_progress": "{done} / {total} téléchargés",
+    "update.downloading_progress_unknown": "{done} téléchargés",
+    "update.download_cancelled_title": "Mise à jour annulée",
+    "update.download_cancelled_message": (
+        "Le téléchargement a été annulé. L'appli reste dans sa version actuelle."
+    ),
+    "update.ready_title": "Mise à jour prête",
+    "update.ready_message": (
+        "La version {version} a été téléchargée.\n\n"
+        "L'appli va maintenant se fermer, s'installer et se rouvrir toute seule.\n"
+        "Laisse-la faire, ça prend quelques secondes."
+    ),
+    # -- cas particuliers
+    "update.dev_mode_title": "Mode développement",
+    "update.dev_mode_message": (
+        "L'appli tourne depuis le code source, pas depuis l'exécutable : "
+        "l'installation automatique est désactivée (elle remplacerait "
+        "l'interpréteur Python).\n\n"
+        "Version installée : {current}\nDernière version publiée : {latest}\n\n"
+        "Pour te mettre à jour : `git pull` puis reconstruis l'exe."
+    ),
+    "update.error_title": "Mise à jour impossible",
+    # -- messages d'erreur (déjà traduits, affichés tels quels)
+    "update.error_network": (
+        "Impossible de contacter GitHub.\n\n"
+        "Vérifie ta connexion internet et réessaie."
+    ),
+    "update.error_ssl": (
+        "La connexion sécurisée à GitHub a échoué (certificat refusé).\n\n"
+        "Cela arrive souvent derrière un antivirus ou un réseau d'entreprise "
+        "qui inspecte le trafic HTTPS."
+    ),
+    "update.error_rate_limit": (
+        "GitHub a temporairement refusé la requête (trop de vérifications "
+        "depuis cette connexion).\n\nRéessaie dans une heure."
+    ),
+    "update.error_http": "GitHub a répondu une erreur (code {code}). Réessaie plus tard.",
+    "update.error_no_release": (
+        "Aucune version n'a encore été publiée sur GitHub : il n'y a rien à "
+        "installer pour le moment."
+    ),
+    "update.error_bad_response": "La réponse de GitHub est illisible. Réessaie plus tard.",
+    "update.error_bad_tag": (
+        "La dernière version publiée porte un numéro illisible ({tag}) : "
+        "mise à jour automatique impossible."
+    ),
+    "update.error_no_asset": (
+        "La dernière version publiée ne contient aucun fichier .exe à installer.\n\n"
+        "Télécharge-la manuellement depuis la page des versions sur GitHub."
+    ),
+    "update.error_folder_readonly": (
+        "Le dossier de l'appli n'est pas modifiable :\n{folder}\n\n"
+        "Déplace l'appli dans un dossier personnel (Bureau, Documents...) ou "
+        "relance-la en tant qu'administrateur."
+    ),
+    "update.error_cleanup": "Impossible de supprimer un fichier temporaire ({path}) : {error}",
+    "update.error_download": "Le téléchargement a échoué : {error}",
+    "update.error_truncated": (
+        "Le téléchargement est incomplet (connexion interrompue).\n\n"
+        "Réessaie ; le fichier partiel a été supprimé."
+    ),
+    "update.error_missing_new_exe": (
+        "Le fichier téléchargé est introuvable ({path}) : installation annulée."
+    ),
+    "update.error_relaunch": "Impossible de lancer l'installation : {error}",
+
     # ------------------------------------------------------ Menu latéral ---
     "tool.downloader": "Vidéos (YouTube, TikTok...)",
     "tool.image_compressor": "Compresseur d'images",
@@ -469,6 +558,94 @@ _EN = {
     "app.theme_light": "Light",
     "app.theme_dark": "Dark",
     "app.language_label": "Language",
+
+    # ------------------------------------------------------------ Updates ---
+    "update.button": "Check for updates",
+    "update.checking": "Checking...",
+    "update.current_version": "v{version}",
+    # -- check result
+    "update.up_to_date_title": "No update available",
+    "update.up_to_date_message": (
+        "You already have the latest version ({version}).\n\n"
+        "Nothing to do, the app is up to date."
+    ),
+    "update.available_title": "Update available",
+    "update.available_message": (
+        "A new version is available:\n\n"
+        "    Installed version: {current}\n"
+        "    New version: {latest}\n\n"
+        "Do you want to download and install it now?\n"
+        "The app will close and reopen by itself once the installation is "
+        "finished (about a minute)."
+    ),
+    "update.notes_header": "\n\nWhat's new:\n{notes}",
+    # -- download
+    "update.downloading_title": "Downloading the update",
+    "update.downloading_status": "Downloading version {version}...",
+    "update.downloading_progress": "{done} / {total} downloaded",
+    "update.downloading_progress_unknown": "{done} downloaded",
+    "update.download_cancelled_title": "Update cancelled",
+    "update.download_cancelled_message": (
+        "The download was cancelled. The app stays on its current version."
+    ),
+    "update.ready_title": "Update ready",
+    "update.ready_message": (
+        "Version {version} has been downloaded.\n\n"
+        "The app will now close, install it and reopen by itself.\n"
+        "Just let it do its thing, it takes a few seconds."
+    ),
+    # -- special cases
+    "update.dev_mode_title": "Development mode",
+    "update.dev_mode_message": (
+        "The app is running from source, not from the executable: automatic "
+        "installation is disabled (it would replace the Python interpreter).\n\n"
+        "Installed version: {current}\nLatest published version: {latest}\n\n"
+        "To update: `git pull`, then rebuild the exe."
+    ),
+    "update.error_title": "Update failed",
+    # -- error messages (already translated, shown as-is)
+    "update.error_network": (
+        "Could not reach GitHub.\n\n"
+        "Check your internet connection and try again."
+    ),
+    "update.error_ssl": (
+        "The secure connection to GitHub failed (certificate rejected).\n\n"
+        "This often happens behind an antivirus or a corporate network that "
+        "inspects HTTPS traffic."
+    ),
+    "update.error_rate_limit": (
+        "GitHub temporarily refused the request (too many checks from this "
+        "connection).\n\nTry again in an hour."
+    ),
+    "update.error_http": "GitHub returned an error (code {code}). Try again later.",
+    "update.error_no_release": (
+        "No version has been published on GitHub yet: there is nothing to "
+        "install right now."
+    ),
+    "update.error_bad_response": "GitHub's response could not be read. Try again later.",
+    "update.error_bad_tag": (
+        "The latest published version has an unreadable number ({tag}): "
+        "automatic update is not possible."
+    ),
+    "update.error_no_asset": (
+        "The latest published version does not include any .exe to install.\n\n"
+        "Download it manually from the releases page on GitHub."
+    ),
+    "update.error_folder_readonly": (
+        "The app folder is not writable:\n{folder}\n\n"
+        "Move the app to a personal folder (Desktop, Documents...) or run it "
+        "as administrator."
+    ),
+    "update.error_cleanup": "Could not delete a temporary file ({path}): {error}",
+    "update.error_download": "The download failed: {error}",
+    "update.error_truncated": (
+        "The download is incomplete (connection interrupted).\n\n"
+        "Try again; the partial file has been deleted."
+    ),
+    "update.error_missing_new_exe": (
+        "The downloaded file is missing ({path}): installation cancelled."
+    ),
+    "update.error_relaunch": "Could not start the installation: {error}",
 
     # --------------------------------------------------------- Side menu ---
     "tool.downloader": "Videos (YouTube, TikTok...)",

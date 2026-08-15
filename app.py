@@ -15,13 +15,20 @@ autorisation peut violer les CGU des plateformes et la loi selon l'usage.
 """
 
 import os
+import queue
 import subprocess
 import sys
+import threading
+from tkinter import messagebox
 
 import customtkinter as ctk
 from tkinterdnd2 import TkinterDnD
 
-from common import DEFAULT_OUTPUT_DIR, ensure_dir
+import updater
+from common import (
+    APP_VERSION, DEFAULT_OUTPUT_DIR, PAD, SILENT_IO, clean_child_env, ensure_dir,
+    format_size, ps_quote, run_detached_powershell, wait_targets,
+)
 from i18n import (
     LABEL_TO_LANGUAGE, LANGUAGE_LABELS, get_language, save_language, t,
 )
@@ -87,6 +94,16 @@ class ToolboxApp(ctk.CTk, TkinterDnD.DnDWrapper):
         # Levé par le sélecteur de langue ; lu après mainloop() pour relancer l'appli.
         self.restart_requested = False
 
+        # Mises à jour : même schéma que les onglets (thread de travail -> file
+        # d'attente -> after(100) qui vide la file dans le thread de l'interface).
+        # Indispensable ici aussi : un appel réseau direct dans le gestionnaire de clic
+        # gèlerait la fenêtre entière le temps de la requête -- jusqu'à 15 s de fenêtre
+        # blanche "ne répond pas" si GitHub est injoignable.
+        self.update_queue = queue.Queue()
+        self.update_thread = None
+        self.update_cancel = None
+        self.update_window = None
+
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
 
@@ -95,6 +112,16 @@ class ToolboxApp(ctk.CTk, TkinterDnD.DnDWrapper):
 
         # Sélectionne le premier outil par défaut.
         self._show_tool(TOOLS[0][1])
+
+        self.after(100, self._poll_update_queue)
+
+        # Point d'entrée pour l'automatisation : `MediaDownloader.exe --check-updates`
+        # déclenche exactement la même routine que le bouton, une fois la fenêtre
+        # affichée. Sert aux tests de bout en bout du cycle de mise à jour (impossibles
+        # à scripter autrement sans simuler des clics à l'aveugle), et accessoirement à
+        # se fabriquer un raccourci "vérifier les mises à jour" sur le Bureau.
+        if "--check-updates" in sys.argv[1:]:
+            self.after(800, self._on_check_updates)
 
     # ----------------------------------------------------------- Sidebar ---
     def _build_sidebar(self):
@@ -155,6 +182,19 @@ class ToolboxApp(ctk.CTk, TkinterDnD.DnDWrapper):
             variable=self.language_var, command=self._on_language_change)
         self.language_menu.pack(fill="x", pady=(4, 0))
 
+        # Mises à jour, tout en bas du menu : c'est une action rare, elle n'a pas à
+        # concurrencer visuellement les outils. Le numéro de version juste dessous, en
+        # gris discret, répond d'un coup d'œil à « c'est quelle version, ça ? » -- utile
+        # au support à distance ("papa, tu es en quelle version ?") et rassurant après
+        # une mise à jour, puisque c'est la preuve visible qu'elle a bien été appliquée.
+        update_frame = ctk.CTkFrame(self.nav_container, fg_color="transparent")
+        update_frame.grid(row=len(TOOLS) + 3, column=0, sticky="sew", pady=(0, 10))
+        self.update_btn = ctk.CTkButton(
+            update_frame, text=t("update.button"), command=self._on_check_updates)
+        self.update_btn.pack(fill="x")
+        ctk.CTkLabel(update_frame, text=t("update.current_version", version=APP_VERSION),
+                     text_color=("gray40", "gray60")).pack(fill="x", pady=(2, 0))
+
     def _toggle_sidebar(self):
         if self._sidebar_animating:
             return  # ignore les clics pendant qu'une animation est déjà en cours
@@ -212,6 +252,211 @@ class ToolboxApp(ctk.CTk, TkinterDnD.DnDWrapper):
         # fenêtres coexistent une fraction de seconde, ce qui donne un clignotement peu
         # soigné et un focus qui part sur l'ancienne fenêtre en train de mourir.
         self.restart_requested = True
+        self.destroy()
+
+    # ------------------------------------------------------ Mises à jour ---
+    # Enchaînement complet, du clic à la nouvelle version qui s'ouvre :
+    #   _on_check_updates  -> thread   -> ("check_ok"|"check_error")
+    #   _handle_check_result           -> question à l'utilisateur
+    #   _start_download    -> thread   -> ("progress"|"download_ok"|...)
+    #   _finish_download               -> updater.apply_update() + destroy()
+    # Tout ce qui touche à des widgets vit côté _poll_update_queue (thread de l'UI) ;
+    # les threads de travail ne font QUE poser des messages dans la file. Tkinter n'est
+    # pas thread-safe : toucher un widget depuis un thread de travail provoque des
+    # plantages aléatoires, souvent bien plus tard et sans rapport apparent.
+
+    def _on_check_updates(self):
+        if self.update_thread is not None and self.update_thread.is_alive():
+            return  # vérification déjà en cours : on ignore les clics répétés
+        self.update_btn.configure(state="disabled", text=t("update.checking"))
+        self.update_thread = threading.Thread(target=self._run_check, daemon=True)
+        self.update_thread.start()
+
+    def _run_check(self):
+        """Thread de travail : interroge l'API GitHub. Aucun widget touché ici."""
+        try:
+            available, release = updater.check_for_update()
+            self.update_queue.put(("check_ok", (available, release)))
+        except updater.UpdateError as e:
+            self.update_queue.put(("check_error", str(e)))
+        except Exception as e:
+            # Filet de sécurité : une exception inattendue dans un thread démon passe
+            # totalement inaperçue (aucune trace en mode fenêtré) et laisserait le
+            # bouton grisé pour toujours, sans le moindre indice pour l'utilisateur.
+            self.update_queue.put(("check_error", t("common.unexpected_error_log") + f" {e}"))
+
+    def _poll_update_queue(self):
+        try:
+            while True:
+                kind, payload = self.update_queue.get_nowait()
+                if kind == "check_ok":
+                    self._reset_update_button()
+                    self._handle_check_result(*payload)
+                elif kind == "check_error":
+                    self._reset_update_button()
+                    messagebox.showerror(t("update.error_title"), payload)
+                elif kind == "progress":
+                    self._show_download_progress(*payload)
+                elif kind == "download_ok":
+                    self._finish_download(payload)
+                elif kind == "download_error":
+                    self._close_progress_window()
+                    self._reset_update_button()
+                    messagebox.showerror(t("update.error_title"), payload)
+                elif kind == "download_cancelled":
+                    self._close_progress_window()
+                    self._reset_update_button()
+                    messagebox.showinfo(t("update.download_cancelled_title"),
+                                        t("update.download_cancelled_message"))
+        except queue.Empty:
+            pass
+        self.after(100, self._poll_update_queue)
+
+    def _reset_update_button(self):
+        # configure() sur un widget détruit lève une TclError : c'est le cas normal
+        # quand la fenêtre se ferme pour installer la mise à jour pendant qu'un dernier
+        # message traîne encore dans la file.
+        try:
+            self.update_btn.configure(state="normal", text=t("update.button"))
+        except Exception:
+            pass
+
+    def _handle_check_result(self, available, release):
+        latest = release["version"]
+        if not available:
+            messagebox.showinfo(t("update.up_to_date_title"),
+                                t("update.up_to_date_message", version=APP_VERSION))
+            return
+
+        if not updater.can_self_update():
+            # Lancée depuis les sources : sys.executable est python.exe, le remplacer
+            # serait absurde et destructeur. On informe, et c'est tout.
+            messagebox.showinfo(
+                t("update.dev_mode_title"),
+                t("update.dev_mode_message", current=APP_VERSION, latest=latest))
+            return
+
+        message = t("update.available_message", current=APP_VERSION, latest=latest)
+        notes = (release.get("notes") or "").strip()
+        if notes:
+            # Notes tronquées : le corps d'une release peut faire des pages entières,
+            # et une boîte de dialogue Windows plus haute que l'écran devient
+            # inutilisable (les boutons sortent de la zone visible).
+            if len(notes) > 400:
+                notes = notes[:400].rstrip() + "..."
+            message += t("update.notes_header", notes=notes)
+
+        if messagebox.askyesno(t("update.available_title"), message):
+            self._start_download(release)
+
+    def _start_download(self, release):
+        self.update_btn.configure(state="disabled", text=t("update.checking"))
+        self.update_cancel = threading.Event()
+        self._open_progress_window(release["version"])
+        self.update_thread = threading.Thread(
+            target=self._run_download, args=(release,), daemon=True)
+        self.update_thread.start()
+
+    def _run_download(self, release):
+        """Thread de travail : télécharge l'exe de la release."""
+        try:
+            path = updater.download_update(
+                release["asset_url"],
+                expected_size=release.get("asset_size") or 0,
+                progress_cb=lambda done, total: self.update_queue.put(
+                    ("progress", (done, total, release["version"]))),
+                cancel_event=self.update_cancel,
+            )
+            self.update_queue.put(("download_ok", (path, release["version"])))
+        except updater.UpdateCancelled:
+            self.update_queue.put(("download_cancelled", None))
+        except updater.UpdateError as e:
+            self.update_queue.put(("download_error", str(e)))
+        except Exception as e:
+            self.update_queue.put(
+                ("download_error", t("common.unexpected_error_log") + f" {e}"))
+
+    # ---- Petite fenêtre de progression du téléchargement
+    def _open_progress_window(self, version):
+        window = ctk.CTkToplevel(self)
+        window.title(t("update.downloading_title"))
+        window.geometry("420x150")
+        window.resizable(False, False)
+        # transient + grab_set : la fenêtre reste au-dessus de l'appli et bloque les
+        # interactions avec celle-ci pendant le téléchargement -- sans ça, rien
+        # n'empêche de relancer une vérification ou de fermer l'appli en plein transfert.
+        window.transient(self)
+        window.protocol("WM_DELETE_WINDOW", self._cancel_download)
+
+        self.update_status_label = ctk.CTkLabel(
+            window, text=t("update.downloading_status", version=version))
+        self.update_status_label.pack(**PAD)
+        self.update_progress = ctk.CTkProgressBar(window)
+        self.update_progress.set(0)
+        self.update_progress.pack(fill="x", padx=16)
+        self.update_detail_label = ctk.CTkLabel(
+            window, text="", text_color=("gray40", "gray60"))
+        self.update_detail_label.pack(pady=(4, 0))
+        ctk.CTkButton(window, text=t("common.cancel"),
+                      command=self._cancel_download).pack(pady=(6, 10))
+
+        self.update_window = window
+        # after() et pas tout de suite : sous Windows, un grab_set() sur une CTkToplevel
+        # pas encore réellement affichée échoue ("grab failed: window not viewable").
+        window.after(200, lambda: self._safe_grab(window))
+
+    @staticmethod
+    def _safe_grab(window):
+        try:
+            window.grab_set()
+        except Exception:
+            pass
+
+    def _show_download_progress(self, done, total, version):
+        if self.update_window is None:
+            return
+        try:
+            if total:
+                self.update_progress.set(done / total)
+                detail = t("update.downloading_progress",
+                           done=format_size(done), total=format_size(total))
+            else:
+                # Taille inconnue (serveur sans Content-Length) : barre indéterminée
+                # plutôt qu'une progression mensongère bloquée à 0 %.
+                self.update_progress.configure(mode="indeterminate")
+                detail = t("update.downloading_progress_unknown", done=format_size(done))
+            self.update_detail_label.configure(text=detail)
+        except Exception:
+            pass
+
+    def _cancel_download(self):
+        if self.update_cancel is not None:
+            self.update_cancel.set()
+
+    def _close_progress_window(self):
+        window, self.update_window = self.update_window, None
+        if window is None:
+            return
+        try:
+            window.grab_release()
+            window.destroy()
+        except Exception:
+            pass
+
+    def _finish_download(self, payload):
+        path, version = payload
+        self._close_progress_window()
+        messagebox.showinfo(t("update.ready_title"),
+                            t("update.ready_message", version=version))
+        try:
+            # apply_update() ne fait que PROGRAMMER le remplacement (un PowerShell
+            # détaché qui attend notre mort) : il rend la main immédiatement, et c'est
+            # notre destroy() juste après qui déclenche réellement la suite.
+            updater.apply_update(path)
+        except updater.UpdateError as e:
+            self._reset_update_button()
+            messagebox.showerror(t("update.error_title"), str(e))
+            return
         self.destroy()
 
     # ------------------------------------------------------ Optimisation ---
@@ -309,73 +554,24 @@ def relaunch_self():
         subprocess.Popen([sys.executable, script], cwd=os.path.dirname(script), close_fds=True)
         return
 
-    # IMPORTANT (mode packagé) : une appli PyInstaller fenêtrée n'a AUCUN flux standard
-    # valide -- sys.stdin/stdout/stderr valent None et les handles Windows correspondants
-    # sont invalides. Un processus enfant hérite de ces handles cassés et peut mourir
-    # aussitôt sans le moindre message : c'est exactement ce qui se passait ici, le
-    # lanceur PowerShell ne démarrait jamais et l'appli ne revenait pas. On lui donne
-    # donc explicitement des flux neutres. (Même raison que le capture_output=True
-    # systématique des appels ffmpeg ailleurs dans le projet.)
-    silent_io = {
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-    }
-
-    # PIÈGE CENTRAL de la relance d'un exe --onefile (cause du "Failed to load Python DLL
-    # ...\_MEIxxxxxx\python312.dll" observé en test) : le bootloader communique à son
-    # processus Python, PAR VARIABLES D'ENVIRONNEMENT (_MEIPASS2 sur les anciennes
-    # versions, _PYI_* sur les récentes), le dossier temporaire où il a déjà tout extrait.
-    # Or nous héritons de ces variables, et tout processus que NOUS lançons en hérite à son
-    # tour. Le successeur croit alors que son extraction est déjà faite et va chercher son
-    # python312.dll dans le dossier de l'instance PRÉCÉDENTE... que celle-ci vient
-    # justement de supprimer en se fermant. Il faut donc lui donner un environnement
-    # nettoyé, pour qu'il se comporte exactement comme un lancement depuis l'Explorateur
-    # et procède à sa propre extraction.
-    clean_env = {
-        key: value for key, value in os.environ.items()
-        if key != "_MEIPASS2" and not key.startswith("_PYI")
-    }
-
+    # Les trois précautions ci-dessous (flux neutres SILENT_IO, environnement purgé des
+    # variables du bootloader, PowerShell en chemin absolu) vivent désormais dans
+    # common.py : le mécanisme de mise à jour (updater.apply_update) a exactement les
+    # mêmes besoins, et un copier-coller aurait fini par diverger. Leur "pourquoi"
+    # détaillé est documenté là-bas, à côté du code concerné.
     exe = sys.executable
     work_dir = os.path.dirname(exe)
 
-    # Processus dont il faut attendre la fin : le nôtre, plus le bootloader --onefile
-    # qui nous a lancés (c'est LUI qui supprime le dossier temporaire, après notre sortie).
-    pids = [str(os.getpid())]
-    try:
-        parent_pid = os.getppid()
-        if parent_pid > 0:
-            pids.append(str(parent_pid))
-    except OSError:
-        pass
-
-    # Les apostrophes se doublent dans une chaîne PowerShell (chemin type C:\Users\O'Neil).
-    ps_exe = exe.replace("'", "''")
-    ps_dir = work_dir.replace("'", "''")
     command = (
         "Wait-Process -Id {pids} -Timeout 30 -ErrorAction SilentlyContinue; "
         # Petite marge après la mort du bootloader : la suppression du _MEIxxxx est
         # lancée juste avant qu'il rende la main, elle peut traîner un instant.
         "Start-Sleep -Milliseconds 700; "
         "Start-Process -FilePath '{exe}' -WorkingDirectory '{dir}'"
-    ).format(pids=",".join(pids), exe=ps_exe, dir=ps_dir)
-
-    # Chemin absolu de PowerShell plutôt que "powershell" tout court : le PATH vu par un
-    # exe --onefile n'est pas celui d'un shell classique, on ne s'y fie pas.
-    powershell = os.path.join(
-        os.environ.get("SystemRoot", r"C:\Windows"),
-        "System32", "WindowsPowerShell", "v1.0", "powershell.exe",
-    )
-    if not os.path.isfile(powershell):
-        powershell = "powershell"
+    ).format(pids=",".join(wait_targets()), exe=ps_quote(exe), dir=ps_quote(work_dir))
 
     try:
-        subprocess.Popen(
-            [powershell, "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
-             "-Command", command],
-            creationflags=subprocess.CREATE_NO_WINDOW, close_fds=True,
-            env=clean_env, **silent_io)
+        run_detached_powershell(command)
     except OSError:
         # PowerShell introuvable ou bloqué par une stratégie de sécurité : on relance
         # directement plutôt que de laisser l'utilisateur devant une appli qui s'est
@@ -383,7 +579,7 @@ def relaunch_self():
         # réapparaît, mais mieux vaut ça que rien du tout.
         subprocess.Popen([exe], cwd=work_dir, close_fds=True,
                          creationflags=subprocess.DETACHED_PROCESS,
-                         env=clean_env, **silent_io)
+                         env=clean_child_env(), **SILENT_IO)
 
 
 if __name__ == "__main__":

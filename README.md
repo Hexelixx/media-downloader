@@ -26,6 +26,26 @@ langue (`Images compressées` en français, `Compressed images` en anglais) : si
 de langue après avoir déjà traité des fichiers, pense à vérifier le dossier de destination
 affiché dans l'onglet.
 
+Tout en bas du menu, le bouton **Vérifier les mises à jour** interroge GitHub pour voir
+s'il existe une version plus récente que celle affichée juste en dessous (`v2026.08.15`,
+le numéro de version actuel). Trois cas possibles :
+
+- **Déjà à jour** : un message le dit, il n'y a rien à faire.
+- **Nouvelle version disponible** : l'appli affiche l'ancien et le nouveau numéro (plus
+  les nouveautés, si la version publiée en mentionne) et demande confirmation. Si tu
+  acceptes, elle **télécharge la nouvelle version avec une barre de progression**
+  (annulable à tout moment), puis **se ferme, s'installe et se rouvre toute seule** —
+  il n'y a rien à télécharger à la main, ni de `.zip` à décompresser. L'opération ne
+  remplace que `MediaDownloader.exe` : le dossier `bin\` et le fichier `settings.json`
+  (ta langue) restent en place.
+- **Pas de connexion, GitHub injoignable ou trop de vérifications d'affilée** : un
+  message clair l'explique, l'appli continue de fonctionner normalement.
+
+La vérification se fait **en tâche de fond** : la fenêtre ne se fige jamais, même si
+GitHub met du temps à répondre. Aucun compte ni mot de passe n'est nécessaire (le dépôt
+est public) et **l'appli ne vérifie rien toute seule** — rien ne part sur le réseau tant
+que tu n'as pas cliqué sur le bouton.
+
 Le contenu de chaque outil défile verticalement (comme une page web) si la fenêtre est
 redimensionnée en plus petit : rien n'est jamais coupé/inaccessible, même quand le journal
 ou l'aperçu d'un GIF prend beaucoup de place. Une barre de défilement apparaît
@@ -117,9 +137,72 @@ cd media-downloader
 
 ```powershell
 cd media-downloader
-.\.venv\Scripts\pyinstaller.exe --noconfirm --onefile --windowed --name "MediaDownloader" app.py
+.\.venv\Scripts\pyinstaller.exe --noconfirm MediaDownloader.spec
 ```
 Le nouvel exe apparaît dans `dist\MediaDownloader.exe`.
+
+> **Toujours passer par le fichier `.spec`**, jamais par `--onefile --windowed app.py`
+> directement : la ligne de commande **écrase** le `.spec` et perd au passage les
+> `hiddenimports` (`lxml.etree`, `lxml._elementpath`) que PyInstaller ne détecte pas tout
+> seul — le convertisseur de texte plante alors à l'ouverture d'un `.docx`, mais
+> seulement dans l'exe, jamais en dev, ce qui est particulièrement pénible à diagnostiquer.
+
+## Publier une nouvelle version
+
+Le bouton **Vérifier les mises à jour** de l'appli compare sa propre version au dernier
+tag publié dans les [Releases GitHub](https://github.com/Hexelixx/media-downloader/releases)
+du dépôt. Publier une version, c'est donc créer une release avec l'exe en pièce jointe.
+
+Tout est automatisé par `release.ps1` :
+
+```powershell
+cd media-downloader
+.\release.ps1 -Notes "Ce qui a changé, en une phrase"
+```
+
+Le script enchaîne, en s'arrêtant à la première erreur :
+
+1. vérifie que `git`/`gh` sont là et que le dépôt n'a pas de modification non commitée ;
+2. calcule le nouveau numéro de version (la **date du jour**, voir plus bas) ;
+3. réécrit `APP_VERSION` dans `common.py` ;
+4. reconstruit `dist\MediaDownloader.exe` ;
+5. commit + tag `vAAAA.MM.JJ` + push ;
+6. crée la release GitHub avec l'exe attaché.
+
+Options utiles :
+
+| Option | Effet |
+| --- | --- |
+| `-DryRun` | Affiche tout ce qui serait fait, sans rien modifier ni publier. À lancer en premier en cas de doute. |
+| `-Version 2026.12.25` | Force un numéro précis au lieu de la date du jour. |
+| `-SkipBuild` | Réutilise `dist\MediaDownloader.exe` tel quel (uniquement si tu viens de le construire). |
+| `-Notes "..."` | Notes de version, affichées sur GitHub **et** dans la boîte de dialogue de mise à jour. |
+
+### Schéma de version
+
+Versionnage **par date** : `AAAA.MM.JJ` (`2026.08.15`), plus un suffixe `.2`, `.3`... si
+plusieurs versions sortent le même jour. Le tag git correspondant est préfixé d'un `v`
+(`v2026.08.15`).
+
+Pourquoi la date plutôt que du `1.4.2` : cette appli est livrée en bloc, il n'y a pas
+d'API publique dont on casserait la compatibilité, donc « majeur / mineur / correctif »
+ne veut rien dire ici. Une date répond en revanche à la seule question qu'on se pose
+vraiment devant l'exe : *il date de quand, celui-là ?* C'est aussi exactement le schéma
+utilisé par yt-dlp, la dépendance principale du projet.
+
+Le numéro de version n'existe **qu'à un seul endroit** : la constante `APP_VERSION` en
+haut de `common.py`. Ne l'écris jamais en dur ailleurs — `release.ps1` réécrit cette
+ligne, l'interface l'affiche et le mécanisme de mise à jour la compare. Le tag GitHub et
+`APP_VERSION` restent ainsi cohérents par construction.
+
+### En cas de pépin
+
+- **La release est publiée mais l'appli ne la voit pas** : vérifie que le tag est bien de
+  la forme `v2026.08.15` (un tag `latest`, `release-3` ou `v1.2.3-beta` est ignoré,
+  volontairement) et que l'exe est bien attaché à la release.
+- **`gh` demande une authentification** : `gh auth login` une fois, puis relance.
+- **Le script refuse de partir** (« modifications non commitées ») : c'est voulu, ça évite
+  de publier un exe construit à partir de code non relu. Commit d'abord.
 
 ## Dépendances installées sur cette machine
 

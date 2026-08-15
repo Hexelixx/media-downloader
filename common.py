@@ -5,6 +5,7 @@ Helpers partagés entre tous les onglets de l'appli (chemins, binaires embarqué
 import datetime
 import io
 import os
+import subprocess
 import sys
 from pathlib import Path
 from tkinter import filedialog, messagebox
@@ -12,6 +13,25 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 from i18n import t
+
+# ---------------------------------------------------------------- Version ---
+# SOURCE UNIQUE de la version de l'appli : rien d'autre dans le projet ne doit
+# redéfinir ce numéro (release.ps1 vient réécrire CETTE ligne, et le bouton
+# "Vérifier les mises à jour" compare CETTE valeur au dernier tag GitHub).
+#
+# Schéma retenu : versionnage par date `AAAA.MM.JJ`, avec un suffixe `.N`
+# facultatif si plusieurs publications tombent le même jour (2026.08.15.2).
+# Pourquoi la date plutôt que du SemVer : cette appli est un outil personnel
+# livré en bloc, il n'y a pas d'API publique dont on romprait la compatibilité,
+# donc « majeur/mineur/correctif » ne veut rien dire ici. Une date répond en
+# revanche à la seule question qu'on se pose vraiment devant l'exe de papa :
+# « il date de quand, celui-là ? ». C'est aussi exactement le schéma de yt-dlp,
+# la dépendance principale du projet.
+#
+# Bonus non négligeable : comparé composant par composant en entiers, ce format
+# est monotone croissant par construction — impossible de publier "à l'envers"
+# par erreur, contrairement à un SemVer qu'on oublie de bumper.
+APP_VERSION = "2026.08.15"
 
 DEFAULT_OUTPUT_DIR = str(Path.home() / "Downloads" / "MediaDownloader")
 
@@ -60,6 +80,113 @@ def bundled_ffmpeg_exe():
 def ensure_dir(path):
     os.makedirs(path, exist_ok=True)
     return path
+
+
+# --------------------------------------------- Lancement de sous-processus ---
+# Les trois helpers ci-dessous concentrent les précautions nécessaires pour lancer
+# un processus DEPUIS un exe PyInstaller --onefile fenêtré. Ils étaient à l'origine
+# écrits en dur dans relaunch_self() (app.py) pour le changement de langue ; le
+# mécanisme de mise à jour (updater.py) a exactement les mêmes besoins, d'où la
+# mise en commun ici plutôt qu'un copier-coller qui aurait divergé.
+
+# IMPORTANT : une appli PyInstaller fenêtrée n'a AUCUN flux standard valide --
+# sys.stdin/stdout/stderr valent None et les handles Windows correspondants sont
+# invalides. Un processus enfant hérite de ces handles cassés et peut mourir aussitôt
+# sans le moindre message (constaté : le lanceur PowerShell ne démarrait jamais et
+# l'appli ne revenait pas après un changement de langue). On lui donne donc
+# explicitement des flux neutres.
+SILENT_IO = {
+    "stdin": subprocess.DEVNULL,
+    "stdout": subprocess.DEVNULL,
+    "stderr": subprocess.DEVNULL,
+}
+
+
+def clean_child_env():
+    """Copie de l'environnement débarrassée des variables privées du bootloader
+    PyInstaller, à donner à TOUT processus qu'on lance et qui relancera notre exe.
+
+    PIÈGE CENTRAL de la relance d'un exe --onefile (cause du "Failed to load Python
+    DLL ...\\_MEIxxxxxx\\python312.dll" et des échecs d'import lxml observés en test) :
+    le bootloader communique à son processus Python, PAR VARIABLES D'ENVIRONNEMENT
+    (_MEIPASS2 sur les anciennes versions, _PYI_* sur les récentes), le dossier
+    temporaire où il a déjà tout extrait. Or nous héritons de ces variables, et tout
+    processus que NOUS lançons en hérite à son tour. Le successeur croit alors que son
+    extraction est déjà faite et va chercher ses DLL dans le dossier de l'instance
+    PRÉCÉDENTE... que celle-ci vient justement de supprimer en se fermant. Il faut donc
+    lui donner un environnement nettoyé, pour qu'il se comporte exactement comme un
+    lancement depuis l'Explorateur et procède à sa propre extraction.
+    """
+    return {
+        key: value for key, value in os.environ.items()
+        if key != "_MEIPASS2" and not key.startswith("_PYI")
+    }
+
+
+def powershell_exe():
+    """Chemin absolu de powershell.exe, plutôt que "powershell" tout court : le PATH
+    vu par un exe --onefile n'est pas celui d'un shell classique, on ne s'y fie pas."""
+    candidate = os.path.join(
+        os.environ.get("SystemRoot", r"C:\Windows"),
+        "System32", "WindowsPowerShell", "v1.0", "powershell.exe",
+    )
+    return candidate if os.path.isfile(candidate) else "powershell"
+
+
+def run_detached_powershell(command):
+    """Lance `command` dans un PowerShell détaché, invisible, qui SURVIT à notre
+    propre mort -- c'est le seul moyen d'exécuter quelque chose « après la fermeture
+    de l'appli » (attendre notre fin, remplacer notre exe, nous relancer).
+
+    On passe par -Command et non par un fichier .ps1 : la stratégie d'exécution
+    PowerShell (ExecutionPolicy) ne s'applique QU'AUX FICHIERS de script. Une commande
+    en ligne passe donc toujours, même sur une machine où les .ps1 sont interdits par
+    stratégie de groupe -- et il n'y a aucun fichier temporaire à nettoyer ensuite.
+    """
+    return subprocess.Popen(
+        [powershell_exe(), "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
+         "-Command", command],
+        creationflags=subprocess.CREATE_NO_WINDOW, close_fds=True,
+        env=clean_child_env(), **SILENT_IO)
+
+
+def ps_quote(text):
+    """Échappe une chaîne pour l'insérer entre apostrophes dans du PowerShell.
+    Les apostrophes se doublent (chemin type C:\\Users\\O'Neil)."""
+    return str(text).replace("'", "''")
+
+
+def wait_targets():
+    """PID dont un lanceur externe doit attendre la fin pour être sûr que notre exe
+    est réellement libéré : le nôtre, plus le bootloader --onefile qui nous a lancés
+    (c'est LUI qui détient le handle sur le fichier .exe et supprime le dossier
+    temporaire, après notre sortie)."""
+    pids = [str(os.getpid())]
+    try:
+        parent_pid = os.getppid()
+        if parent_pid > 0:
+            pids.append(str(parent_pid))
+    except OSError:
+        pass
+    return pids
+
+
+def format_size(num_bytes):
+    """Taille lisible par un humain, unités traduites ("12,3 Mo" / "12.3 MB").
+
+    Note : trois onglets embarquent historiquement leur propre copie identique de
+    cette fonction. On ne les touche pas ici (aucun bénéfice, risque de régression
+    sur du code qui marche), mais tout NOUVEL appelant utilise cette version-ci.
+    """
+    if num_bytes < 1024:
+        return f"{num_bytes} {t('common.unit_bytes')}"
+    kb = num_bytes / 1024.0
+    if kb < 1024:
+        return f"{kb:.0f} {t('common.unit_kb')}"
+    mb = kb / 1024.0
+    if mb < 1024:
+        return f"{mb:.1f} {t('common.unit_mb')}"
+    return f"{mb / 1024.0:.2f} {t('common.unit_gb')}"
 
 
 def build_scrollable_body(parent):
