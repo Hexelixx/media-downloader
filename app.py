@@ -297,7 +297,7 @@ class ToolboxApp(ctk.CTk, TkinterDnD.DnDWrapper):
                     self._handle_check_result(*payload)
                 elif kind == "check_error":
                     self._reset_update_button()
-                    messagebox.showerror(t("update.error_title"), payload)
+                    messagebox.showerror(t("update.error_title"), payload, parent=self)
                 elif kind == "progress":
                     self._show_download_progress(*payload)
                 elif kind == "download_ok":
@@ -305,12 +305,13 @@ class ToolboxApp(ctk.CTk, TkinterDnD.DnDWrapper):
                 elif kind == "download_error":
                     self._close_progress_window()
                     self._reset_update_button()
-                    messagebox.showerror(t("update.error_title"), payload)
+                    messagebox.showerror(t("update.error_title"), payload, parent=self)
                 elif kind == "download_cancelled":
                     self._close_progress_window()
                     self._reset_update_button()
                     messagebox.showinfo(t("update.download_cancelled_title"),
-                                        t("update.download_cancelled_message"))
+                                        t("update.download_cancelled_message"),
+                                        parent=self)
                 if self._closing_for_update:
                     # _finish_download vient de détruire la fenêtre (l'installation est
                     # lancée) : on arrête tout de suite. Continuer la boucle appellerait
@@ -332,10 +333,17 @@ class ToolboxApp(ctk.CTk, TkinterDnD.DnDWrapper):
             pass
 
     def _handle_check_result(self, available, release):
+        # parent=self sur TOUTES les boîtes de ce module (et pas seulement ici) : sans
+        # parent explicite, tkinter les rattache à `_default_root`, ce qui les centre sur
+        # l'écran plutôt que sur l'appli et ne garantit pas qu'elles passent devant la
+        # fenêtre principale. Rattachées explicitement, elles se centrent sur l'appli et
+        # restent forcément au-dessus d'elle -- une boîte qui s'ouvrirait derrière la
+        # fenêtre donnerait exactement l'impression que « rien ne se passe » au clic.
         latest = release["version"]
         if not available:
             messagebox.showinfo(t("update.up_to_date_title"),
-                                t("update.up_to_date_message", version=APP_VERSION))
+                                t("update.up_to_date_message", version=APP_VERSION),
+                                parent=self)
             return
 
         if not updater.can_self_update():
@@ -343,7 +351,8 @@ class ToolboxApp(ctk.CTk, TkinterDnD.DnDWrapper):
             # serait absurde et destructeur. On informe, et c'est tout.
             messagebox.showinfo(
                 t("update.dev_mode_title"),
-                t("update.dev_mode_message", current=APP_VERSION, latest=latest))
+                t("update.dev_mode_message", current=APP_VERSION, latest=latest),
+                parent=self)
             return
 
         message = t("update.available_message", current=APP_VERSION, latest=latest)
@@ -356,7 +365,7 @@ class ToolboxApp(ctk.CTk, TkinterDnD.DnDWrapper):
                 notes = notes[:400].rstrip() + "..."
             message += t("update.notes_header", notes=notes)
 
-        if messagebox.askyesno(t("update.available_title"), message):
+        if messagebox.askyesno(t("update.available_title"), message, parent=self):
             self._start_download(release)
 
     def _start_download(self, release):
@@ -458,7 +467,7 @@ class ToolboxApp(ctk.CTk, TkinterDnD.DnDWrapper):
         path, version = payload
         self._close_progress_window()
         messagebox.showinfo(t("update.ready_title"),
-                            t("update.ready_message", version=version))
+                            t("update.ready_message", version=version), parent=self)
         try:
             # apply_update() ne fait que PROGRAMMER le remplacement (un PowerShell
             # détaché qui attend notre mort) : il rend la main immédiatement, et c'est
@@ -466,7 +475,7 @@ class ToolboxApp(ctk.CTk, TkinterDnD.DnDWrapper):
             updater.apply_update(path)
         except updater.UpdateError as e:
             self._reset_update_button()
-            messagebox.showerror(t("update.error_title"), str(e))
+            messagebox.showerror(t("update.error_title"), str(e), parent=self)
             return
         self._closing_for_update = True
         self.destroy()
