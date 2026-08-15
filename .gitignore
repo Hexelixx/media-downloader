@@ -1,0 +1,23 @@
+# Environnement Python local -- jamais commité, chacun recrée le sien (voir README).
+.venv/
+__pycache__/
+*.pyc
+
+# Artefacts de build PyInstaller -- régénérés à chaque build, inutiles à versionner
+# (et le .exe fait ~75 Mo, bien au-delà de ce qui a sa place dans l'historique Git).
+build/
+dist/
+
+# Binaires embarqués (ffmpeg/ffprobe/deno, ~300 Mo à eux trois) -- téléchargés séparément,
+# jamais commités pour les mêmes raisons de poids.
+bin/
+
+# Archive envoyée à papa -- générée à la demande, pas un artefact de code source.
+MediaDownloader-pour-papa.zip
+
+# Préférence de langue de l'utilisateur -- state local, pas du code.
+settings.json
+
+# Fichiers Windows/éditeurs courants.
+Thumbs.db
+.DS_Store
