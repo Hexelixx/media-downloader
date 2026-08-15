@@ -31,7 +31,7 @@ from i18n import t
 # Bonus non négligeable : comparé composant par composant en entiers, ce format
 # est monotone croissant par construction — impossible de publier "à l'envers"
 # par erreur, contrairement à un SemVer qu'on oublie de bumper.
-APP_VERSION = "2026.08.15.3"
+APP_VERSION = "2026.08.15.4"
 
 DEFAULT_OUTPUT_DIR = str(Path.home() / "Downloads" / "MediaDownloader")
 
