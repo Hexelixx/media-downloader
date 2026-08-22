@@ -167,8 +167,28 @@ if ($LASTEXITCODE -ne 0) { throw "Le push a echoue." }
 git push origin "v$Version"
 if ($LASTEXITCODE -ne 0) { throw "Le push du tag a echoue." }
 
+Write-Step "Paquet complet (exe + bin\, pour un premier telechargement)"
+# L'exe seul ne suffit pas a quelqu'un qui n'a encore rien installe (il lui faut
+# aussi ffmpeg/ffprobe/deno dans bin\, a cote) -- sans ce zip, un ami qui va sur
+# GitHub et prend juste MediaDownloader.exe se retrouve avec une appli cassee.
+# Ce zip N'EST PAS ce que le bouton "Verifier les mises a jour" telecharge (lui
+# ne prend que l'exe nu, puisque bin\ existe deja chez quelqu'un qui met a jour) ;
+# il sert uniquement au tout premier telechargement, depuis la page Releases.
+$BinDir = Join-Path $PSScriptRoot "dist\bin"
+$ReadmeDist = Join-Path $PSScriptRoot "dist\README.md"
+$ZipPath = Join-Path $PSScriptRoot "dist\MediaDownloader-complet.zip"
+if (Test-Path -LiteralPath $ZipPath) { Remove-Item -LiteralPath $ZipPath -Force }
+Compress-Archive -Path $ExePath, $BinDir, $ReadmeDist -DestinationPath $ZipPath
+$zipSizeMb = [math]::Round((Get-Item -LiteralPath $ZipPath).Length / 1MB, 1)
+Write-Info "$ZipPath ($zipSizeMb Mo)"
+
 Write-Step "Creation de la release GitHub"
-gh release create "v$Version" $ExePath --title "v$Version" --notes $Notes
+$fullNotes = "**Telecharge ``MediaDownloader-complet.zip``** (contient l'exe + les outils " +
+    "ffmpeg/ffprobe/deno necessaires), decompresse-le ou tu veux, et lance MediaDownloader.exe. " +
+    "C'est tout, aucune installation.`n`n" +
+    "(``MediaDownloader.exe`` seul est aussi fourni separement, pour le mecanisme de mise a " +
+    "jour automatique de l'app -- pas destine a un premier telechargement.)`n`n---`n`n$Notes"
+gh release create "v$Version" $ExePath $ZipPath --title "v$Version" --notes $fullNotes
 if ($LASTEXITCODE -ne 0) { throw "La creation de la release a echoue." }
 
 Write-Step "Termine"
