@@ -18,6 +18,7 @@ import traceback
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 import yt_dlp
+from yt_dlp.postprocessor import MetadataParserPP
 from yt_dlp.utils import DownloadCancelled, DownloadError
 
 from common import (
@@ -106,6 +107,12 @@ class DownloaderTab(ctk.CTkFrame):
         ctk.CTkCheckBox(meta_col, text=t("downloader.metadata"),
                          variable=self.metadata_var).pack(anchor="w", pady=(18, 4))
 
+        track_col = ctk.CTkFrame(opts_frame, fg_color="transparent")
+        track_col.pack(side="left", padx=8, pady=8)
+        self.track_number_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(track_col, text=t("downloader.track_number"),
+                         variable=self.track_number_var).pack(anchor="w", pady=(18, 4))
+
         out_frame = ctk.CTkFrame(body)
         out_frame.pack(fill="x", **PAD)
         ctk.CTkLabel(out_frame, text=t("common.destination_folder"), anchor="w").pack(fill="x", padx=8, pady=(8, 0))
@@ -193,6 +200,7 @@ class DownloaderTab(ctk.CTkFrame):
         quality = self.quality_var.get()
         is_playlist = self.playlist_var.get()
         want_metadata = self.metadata_var.get()
+        want_track_number = self.track_number_var.get()
 
         self.download_btn.configure(state="disabled")
         self.cancel_btn.configure(state="normal")
@@ -201,7 +209,9 @@ class DownloaderTab(ctk.CTkFrame):
         self.cancel_flag.clear()
 
         self.download_thread = threading.Thread(
-            target=self._run_download, args=(url, fmt, quality, is_playlist, want_metadata, output_dir), daemon=True)
+            target=self._run_download,
+            args=(url, fmt, quality, is_playlist, want_metadata, want_track_number, output_dir),
+            daemon=True)
         self.download_thread.start()
 
     def _cancel_download(self):
@@ -225,7 +235,7 @@ class DownloaderTab(ctk.CTkFrame):
             self.log_queue.put(("progress", 1.0))
             self.log_queue.put(("status", t("downloader.finalizing")))
 
-    def _run_download(self, url, fmt, quality, is_playlist, want_metadata, output_dir):
+    def _run_download(self, url, fmt, quality, is_playlist, want_metadata, want_track_number, output_dir):
         # En playlist, chaque piste a une petite chance indépendante de heurter le verrou
         # de fichier transitoire (voir plus bas) -- sur une grosse playlist, la probabilité
         # qu'AU MOINS une piste sur toutes échoue à une tentative donnée devient vite élevée,
@@ -322,6 +332,18 @@ class DownloaderTab(ctk.CTkFrame):
                 # compatible MP4 partout.
                 ydl_opts["format_sort"] = ["acodec:aac"]
 
+            # Numéro de piste : n'a de sens qu'en playlist (playlist_index = position dans
+            # la playlist telle que retournée par le site, ex. 1, 2, 3...). Doit être
+            # inséré AVANT FFmpegMetadata dans la liste -- l'ordre des postprocessors est
+            # celui d'exécution, et FFmpegMetadata lit track_number depuis info_dict pour
+            # écrire le tag "track" (ID3 TRCK pour MP3, équivalent MP4 pour les vidéos) ;
+            # sans ce parseur, track_number n'existe pas dans info_dict et rien n'est écrit.
+            if want_track_number and is_playlist:
+                postprocessors.append({
+                    "key": "MetadataParser",
+                    "actions": [(MetadataParserPP.Actions.INTERPRET, "playlist_index", "%(track_number)s")],
+                })
+
             if want_metadata:
                 # Titre / artiste / album (mappés depuis les infos dispo : titre vidéo,
                 # chaîne/uploader en artiste si aucun artiste explicite, album si présent).
@@ -337,6 +359,16 @@ class DownloaderTab(ctk.CTkFrame):
                 postprocessors.append({
                     "key": "EmbedThumbnail",
                     "already_have_thumbnail": False,
+                })
+            elif want_track_number and is_playlist:
+                # Case "métadonnées" décochée mais numéro de piste demandé quand même :
+                # il faut malgré tout un postprocessor qui écrive réellement le tag dans
+                # le fichier (MetadataParser ne fait que préparer la valeur en mémoire).
+                postprocessors.append({
+                    "key": "FFmpegMetadata",
+                    "add_metadata": True,
+                    "add_chapters": False,
+                    "add_infojson": False,
                 })
 
             ydl_opts["postprocessors"] = postprocessors
